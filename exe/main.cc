@@ -46,7 +46,7 @@ int startAgent(std::vector<std::string> arguments) {
 #endif
 
     try {
-        if (!Configuration::Instance().get<bool>("foreground")) {
+        if (!Configuration::Instance().foreground()) {
 #ifdef _WIN32
             Util::daemonize();
 #else

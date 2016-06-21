@@ -25,8 +25,7 @@ extern const std::string DEFAULT_SPOOL_DIR;     // used by unit tests
 //
 // Types
 //
-
-using Types = HorseWhisperer::FlagType;
+enum class Types { Bool, Int, Double, String, MultiString };
 
 struct EntryBase
 {
@@ -39,8 +38,6 @@ struct EntryBase
     std::string help;
     // Value type
     Types type;
-    // Whether the option was already parsed from config file
-    bool configured = false;
 
     EntryBase(std::string _name, std::string _aliases, std::string _help, Types _type)
             : name { std::move(_name) },
@@ -55,11 +52,15 @@ struct Entry : EntryBase
 {
     // Default value
     T value;
+    // Function for storing the value in a Configuration::Agent
+    std::function<void(T&)> setter;
 
     Entry<T>(std::string _name, std::string _aliases, std::string _help, Types _type,
-             T _value)
+             T _value, std::function<void(T&)> _setter)
             : EntryBase { std::move(_name), std::move(_aliases), std::move(_help), std::move(_type) },
-              value { std::move(_value) } {
+              value { std::move(_value) }, setter { std::move(_setter) } {
+        // Initialize from the default value.
+        setter(value);
     }
 };
 
@@ -170,48 +171,6 @@ class Configuration
     /// invalid value.
     void validate();
 
-    /// If Configuration was already validated, return the value
-    /// set for the specified flag (NB: the value can be a default);
-    /// throw a Configuration::Error such flag is unknown.
-    /// If Configuration was not validated so far, return the default
-    /// value in case nd the requested flag is known or throw a
-    /// Configuration::Error otherwise.
-    template <typename T>
-    T get(std::string flagname)
-    {
-        if (valid_) {
-            try {
-                return HorseWhisperer::GetFlag<T>(flagname);
-            } catch (HorseWhisperer::undefined_flag_error& e) {
-                throw Configuration::Error { std::string { e.what() } };
-            }
-        }
-
-
-        const auto& opt_idx = getDefaultIndex(flagname);
-        Entry<T>* entry_ptr = (Entry<T>*) opt_idx->ptr.get();
-        return entry_ptr->value;
-    }
-
-    /// Set the specified value for a given configuration flag.
-    /// Throw an Configuration::Error in case the Configuration was
-    /// not initialized so far.
-    /// Throw a Configuration::Error in case the specified flag is
-    /// unknown or the value is invalid.
-    template<typename T>
-    void set(std::string flagname, T value)
-    {
-        checkValidForSetting();
-
-        try {
-            HorseWhisperer::SetFlag<T>(flagname, value);
-        } catch (HorseWhisperer::flag_validation_error) {
-            throw Configuration::Error { getInvalidFlagError(flagname) };
-        } catch (HorseWhisperer::undefined_flag_error) {
-            throw Configuration::Error { getUnknownFlagError(flagname) };
-        }
-    }
-
     /// Return an object containing all agent configuration options
     const Agent& getAgentConfiguration() const;
 
@@ -219,6 +178,14 @@ class Configuration
     /// file in append mode and associate it to the log file stream.
     /// All possible exceptions will be filtered.
     void reopenLogfile() const;
+
+#ifndef _WIN32
+    /// Get the pid lock file name.
+    std::string const& pidfile() const { return pidfile_; }
+#endif
+
+    /// Get whether running in foreground mode.
+    bool foreground() const { return foreground_; }
 
   private:
     // Whether the Configuration singleton has successfully validated
@@ -239,6 +206,13 @@ class Configuration
 
     // Path to the logfile
     std::string logfile_;
+    std::string loglevel_;
+
+    // Service options
+    bool foreground_;
+#ifndef _WIN32
+    std::string pidfile_;
+#endif
 
     // Stream abstraction object for the logfile
     mutable boost::nowide::ofstream logfile_fstream_;
@@ -253,7 +227,6 @@ class Configuration
     void validateAndNormalizeWebsocketSettings();
     void validateAndNormalizeOtherSettings();
     void setAgentConfiguration();
-    const Options::iterator getDefaultIndex(const std::string& flagname);
     std::string getInvalidFlagError(const std::string& flagname);
     std::string getUnknownFlagError(const std::string& flagname);
     void checkValidForSetting();

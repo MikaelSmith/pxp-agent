@@ -156,7 +156,6 @@ HW::ParseResult Configuration::parseOptions(int argc, char *argv[])
     }
 
     if (parse_result == HW::ParseResult::OK) {
-        config_file_ = lth_file::tilde_expand(HW::GetFlag<std::string>("config-file"));
         if (!config_file_.empty()) {
             parseConfigFile();
         }
@@ -186,9 +185,7 @@ static void validateLogDirPath(const std::string& logfile)
 
 void Configuration::setupLogging()
 {
-    logfile_ = HW::GetFlag<std::string>("logfile");
     auto log_on_stdout = (logfile_ == "-");
-    auto loglevel = HW::GetFlag<std::string>("loglevel");
     std::ostream *stream = nullptr;
 
     if (!log_on_stdout) {
@@ -206,13 +203,13 @@ void Configuration::setupLogging()
     }
 
 #ifndef _WIN32
-    if (!HW::GetFlag<bool>("foreground") && log_on_stdout) {
+    if (!foreground_ && log_on_stdout) {
         // NOTE(ale): util/posix/daemonize.cc will ensure that the
         // daemon is not associated with any controlling terminal.
         // It will also redirect stdout to /dev/null, together
         // with the other standard files. Set log_level to none to
         // reduce useless overhead since logfile is set to stdout.
-        loglevel = "none";
+        loglevel_ = "none";
     }
 #endif
 
@@ -228,10 +225,10 @@ void Configuration::setupLogging()
             { "error", lth_log::log_level::error },
             { "fatal", lth_log::log_level::fatal }
         };
-        lvl = option_to_log_level.at(loglevel);
+        lvl = option_to_log_level.at(loglevel_);
     } catch (const std::out_of_range& e) {
         throw Configuration::Error {
-            lth_loc::format("invalid log level: '{1}'", loglevel) };
+            lth_loc::format("invalid log level: '{1}'", loglevel_) };
     }
 
     // Configure logging for pxp-agent
@@ -249,7 +246,7 @@ void Configuration::setupLogging()
 #endif  // DEV_LOG_COLOR
 
     // Configure logging for cpp-pcp-client
-    PCPClient::Util::setupLogging(*stream, force_colorization, loglevel);
+    PCPClient::Util::setupLogging(*stream, force_colorization, loglevel_);
 
     LOG_DEBUG("Logging configured");
 
@@ -271,25 +268,6 @@ void Configuration::validate()
 const Configuration::Agent& Configuration::getAgentConfiguration() const
 {
     assert(valid_);
-    auto brokers = HW::GetFlag<std::vector<std::string>>("broker-ws-uris");
-    if (brokers.empty())
-        brokers.push_back(HW::GetFlag<std::string>("broker-ws-uri"));
-
-    agent_configuration_ = Configuration::Agent {
-        HW::GetFlag<std::string>("modules-dir"),
-        std::move(brokers),
-        HW::GetFlag<std::string>("ssl-ca-cert"),
-        HW::GetFlag<std::string>("ssl-cert"),
-        HW::GetFlag<std::string>("ssl-key"),
-        HW::GetFlag<std::string>("spool-dir"),
-        HW::GetFlag<std::string>("spool-dir-purge-ttl"),
-        HW::GetFlag<std::string>("modules-config-dir"),
-        AGENT_CLIENT_TYPE,
-        HW::GetFlag<int>("connection-timeout") * 1000,
-        static_cast<uint32_t >(HW::GetFlag<int>("association-timeout")),
-        static_cast<uint32_t >(HW::GetFlag<int>("association-request-ttl")),
-        static_cast<uint32_t >(HW::GetFlag<int>("pcp-message-ttl")),
-        static_cast<uint32_t >(HW::GetFlag<int>("allowed-keepalive-timeouts")) };
     return agent_configuration_;
 }
 
@@ -318,13 +296,44 @@ Configuration::Configuration() : valid_ { false },
                                  config_file_ { "" },
                                  agent_configuration_ {},
                                  logfile_ { "" },
+                                 loglevel_ { "" },
+                                 foreground_ { false },
                                  logfile_fstream_ {}
 {
     defineDefaultValues();
 }
 
+static void validate_wss(std::string const& uri, std::string const& name)
+{
+    if (uri.find("wss://") != 0)
+        throw Configuration::Error {
+            lth_loc::format("{1} value \"{2}\" must start with wss://", name, uri) };
+}
+
+// Helper function
+std::string check_and_expand_ssl_cert(const std::string& cert_name)
+{
+    auto c = HW::GetFlag<std::string>(cert_name);
+    if (c.empty())
+        throw Configuration::Error {
+            lth_loc::format("{1} value must be defined", cert_name) };
+
+    c = lth_file::tilde_expand(c);
+    if (!fs::exists(c))
+        throw Configuration::Error {
+            lth_loc::format("{1} file '{2}' not found", cert_name, c) };
+
+    if (!lth_file::file_readable(c))
+        throw Configuration::Error {
+            lth_loc::format("{1} file '{2}' not readable", cert_name, c) };
+
+    return c;
+}
+
 void Configuration::defineDefaultValues()
 {
+    agent_configuration_.client_type = AGENT_CLIENT_TYPE;
+
     defaults_.insert(
         Option { "config-file",
                  Base_ptr { new Entry<std::string>(
@@ -332,7 +341,10 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::format("Config file, default: {1}", DEFAULT_CONFIG_FILE),
                     Types::String,
-                    DEFAULT_CONFIG_FILE) } });
+                    DEFAULT_CONFIG_FILE,
+                    [&](std::string &s) {
+                        config_file_ = lth_file::tilde_expand(s);
+                    }) } });
 
     defaults_.insert(
         Option { "broker-ws-uri",
@@ -341,7 +353,17 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::translate("WebSocket URI of the PCP broker"),
                     Types::String,
-                    "") } });
+                    "",
+                    [&](std::string &uri) {
+                        if (!uri.empty()) {
+                            if (!agent_configuration_.broker_ws_uris.empty())
+                                throw Configuration::Error {
+                                    lth_loc::translate("broker-ws-uri and broker-ws-uris cannot both be defined") };
+
+                            validate_wss("broker-ws-uri", uri);
+                            agent_configuration_.broker_ws_uris.push_back(uri);
+                        }
+                    }) } });
 
     defaults_.insert(
         Option { "broker-ws-uris",
@@ -351,7 +373,20 @@ void Configuration::defineDefaultValues()
                     lth_loc::translate("List of WebSocket URIs of PCP brokers "
                                        "(cannot be used with broker-ws-uri)"),
                     Types::MultiString,
-                    {}) } });
+                    {},
+                    [&](std::vector<std::string> &vals) {
+                        if (!agent_configuration_.broker_ws_uris.empty())
+                            throw Configuration::Error {
+                                lth_loc::translate("broker-ws-uri and broker-ws-uris cannot both be defined") };
+
+                        for (auto &uri : vals) {
+                            validate_wss("broker-ws-uris", uri);
+                        }
+
+                        if (!vals.empty()) {
+                            agent_configuration_.broker_ws_uris = vals;
+                        }
+                    }) } });
 
     defaults_.insert(
         Option { "connection-timeout",
@@ -361,7 +396,10 @@ void Configuration::defineDefaultValues()
                     lth_loc::translate("Timeout (in seconds) for starting the "
                                        "WebSocket handshake, default: 5 s"),
                     Types::Int,
-                    5) } });
+                    5,
+                    [&](int &i) {
+                        agent_configuration_.ws_connection_timeout_ms = i * 1000;
+                    }) } });
 
     // Hidden option: number of ping/pong timeouts to allow before
     // disconnecting, default: 2
@@ -372,7 +410,10 @@ void Configuration::defineDefaultValues()
                     "",
                     "<hidden>",
                     Types::Int,
-                    2) } });
+                    2,
+                    [&](int &i) {
+                        agent_configuration_.allowed_keepalive_timeouts = static_cast<uint32_t>(i);
+                    }) } });
 
     // Hidden option: PCP Association timeout, default: 15 s
     defaults_.insert(
@@ -382,17 +423,29 @@ void Configuration::defineDefaultValues()
                     "",
                     "<hidden>",
                     Types::Int,
-                    15) } });
+                    15,
+                    [&](int &i) {
+                        if (i < 0)
+                            throw Configuration::Error {
+                                lth_loc::translate("association-timeout must be positive") };
+                        agent_configuration_.association_timeout_s = static_cast<uint32_t>(i);
+                    }) } });
 
     // Hidden option: TTL of the PCP Association request, default: 10 s
     defaults_.insert(
-            Option { "association-request-ttl",
-                     Base_ptr { new Entry<int>(
-                             "association-request-ttl",
-                             "",
-                             "<hidden>",
-                             Types::Int,
-                             10) } });
+        Option { "association-request-ttl",
+                 Base_ptr { new Entry<int>(
+                    "association-request-ttl",
+                    "",
+                    "<hidden>",
+                    Types::Int,
+                    10,
+                    [&](int &i) {
+                        if (i < 0)
+                            throw Configuration::Error {
+                                lth_loc::translate("association-request-ttl must be positive") };
+                        agent_configuration_.association_request_ttl_s = static_cast<uint32_t>(i);
+                    }) } });
 
     // Hidden option: TTL of the PCP messages, default: 5 s
     defaults_.insert(
@@ -402,7 +455,13 @@ void Configuration::defineDefaultValues()
                     "",
                     "<hidden>",
                     Types::Int,
-                    5) } });
+                    5,
+                    [&](int &i) {
+                        if (i < 0)
+                            throw Configuration::Error {
+                                lth_loc::translate("association-request-ttl must be positive") };
+                        agent_configuration_.pcp_message_ttl_s = static_cast<uint32_t>(i);
+                    }) } });
 
     defaults_.insert(
         Option { "ssl-ca-cert",
@@ -411,7 +470,11 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::translate("SSL CA certificate"),
                     Types::String,
-                    "") } });
+                    "",
+                    [&](std::string &s) {
+                        if (!s.empty())
+                            agent_configuration_.ca = check_and_expand_ssl_cert(s);
+                    }) } });
 
     defaults_.insert(
         Option { "ssl-cert",
@@ -420,7 +483,11 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::translate("pxp-agent SSL certificate"),
                     Types::String,
-                    "") } });
+                    "",
+                    [&](std::string &s) {
+                        if (!s.empty())
+                            agent_configuration_.crt = check_and_expand_ssl_cert(s);
+                    }) } });
 
     defaults_.insert(
         Option { "ssl-key",
@@ -429,7 +496,11 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::translate("pxp-agent private SSL key"),
                     Types::String,
-                    "") } });
+                    "",
+                    [&](std::string &s) {
+                        if (!s.empty())
+                            agent_configuration_.key = check_and_expand_ssl_cert(s);
+                    }) } });
 
     defaults_.insert(
         Option { "logfile",
@@ -438,7 +509,10 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::format("Log file, default: {1}", DEFAULT_LOG_FILE),
                     Types::String,
-                    DEFAULT_LOG_FILE) } });
+                    DEFAULT_LOG_FILE,
+                    [&](std::string &s) {
+                        logfile_ = s;
+                    }) } });
 
     defaults_.insert(
         Option { "loglevel",
@@ -449,7 +523,10 @@ void Configuration::defineDefaultValues()
                                        "'debug', 'info','warning', 'error' and "
                                        "'fatal'. Defaults to 'info'"),
                     Types::String,
-                    "info") } });
+                    "info",
+                    [&](std::string &s) {
+                        loglevel_ = s;
+                    }) } });
 
     defaults_.insert(
         Option { "modules-dir",
@@ -462,7 +539,10 @@ void Configuration::defineDefaultValues()
 #endif
                                     ": {1}", DEFAULT_MODULES_DIR),
                     Types::String,
-                    DEFAULT_MODULES_DIR) } });
+                    DEFAULT_MODULES_DIR,
+                    [&](std::string &s) {
+                        agent_configuration_.modules_dir = s;
+                    }) } });
 
     defaults_.insert(
         Option { "modules-config-dir",
@@ -472,7 +552,10 @@ void Configuration::defineDefaultValues()
                     lth_loc::format("Module config files directory, default: {1}",
                                     DEFAULT_MODULES_CONF_DIR),
                     Types::String,
-                    DEFAULT_MODULES_CONF_DIR) } });
+                    DEFAULT_MODULES_CONF_DIR,
+                    [&](std::string &s) {
+                        agent_configuration_.modules_config_dir = s;
+                    }) } });
 
     defaults_.insert(
         Option { "spool-dir",
@@ -482,7 +565,10 @@ void Configuration::defineDefaultValues()
                     lth_loc::format("Spool action results directory, default: {1}",
                                     DEFAULT_SPOOL_DIR),
                     Types::String,
-                    DEFAULT_SPOOL_DIR) } });
+                    DEFAULT_SPOOL_DIR,
+                    [&](std::string &s) {
+                        agent_configuration_.spool_dir = s;
+                    }) } });
 
     defaults_.insert(
         Option { "spool-dir-purge-ttl",
@@ -493,7 +579,16 @@ void Configuration::defineDefaultValues()
                                     "default: '{1}' (days)",
                                     DEFAULT_SPOOL_DIR_PURGE_TTL),
                     Types::String,
-                    DEFAULT_SPOOL_DIR_PURGE_TTL) } });
+                    DEFAULT_SPOOL_DIR_PURGE_TTL,
+                    [&](std::string &s) {
+                        try {
+                            Timestamp t(s);
+                        } catch (const Timestamp::Error& e) {
+                            throw Configuration::Error {
+                                lth_loc::format("invalid spool-dir-purge-ttl: {1}", e.what()) };
+                        }
+                        agent_configuration_.spool_dir_purge_ttl = s;
+                    }) } });
 
     defaults_.insert(
         Option { "foreground",
@@ -502,7 +597,10 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::translate("Don't daemonize, default: false"),
                     Types::Bool,
-                    false) } });
+                    false,
+                    [&](bool &b) {
+                        foreground_ = b;
+                    }) } });
 
 #ifndef _WIN32
     // NOTE(ale): we don't daemonize on Windows; we rely NSSM to start
@@ -515,7 +613,10 @@ void Configuration::defineDefaultValues()
                     "",
                     lth_loc::format("PID file path, default: {1}", DEFAULT_PID_FILE),
                     Types::String,
-                    DEFAULT_PID_FILE) } });
+                    DEFAULT_PID_FILE,
+                    [&](std::string &s) {
+                        pidfile_ = s;
+                    }) } });
 #endif
 }
 
@@ -535,56 +636,33 @@ void Configuration::setDefaultValues()
                 {
                     Entry<int>* entry_ptr = (Entry<int>*) opt_idx->ptr.get();
                     HW::DefineGlobalFlag<int>(flag_names, entry_ptr->help,
-                                              entry_ptr->value,
-                                              [entry_ptr] (int v) {
-                                                  entry_ptr->configured = true;
-                                              });
+                                              entry_ptr->value, entry_ptr->setter);
                 }
                 break;
             case Types::Bool:
                 {
                     Entry<bool>* entry_ptr = (Entry<bool>*) opt_idx->ptr.get();
                     HW::DefineGlobalFlag<bool>(flag_names, entry_ptr->help,
-                                               entry_ptr->value,
-                                               [entry_ptr] (bool v) {
-                                                   entry_ptr->configured = true;
-                                               });
+                                               entry_ptr->value, entry_ptr->setter);
                 }
                 break;
             case Types::Double:
                 {
                     Entry<double>* entry_ptr = (Entry<double>*) opt_idx->ptr.get();
                     HW::DefineGlobalFlag<double>(flag_names, entry_ptr->help,
-                                                 entry_ptr->value,
-                                                 [entry_ptr] (double v) {
-                                                     entry_ptr->configured = true;
-                                                 });
+                                                 entry_ptr->value, entry_ptr->setter);
                 }
                 break;
             case Types::String:
                 {
                     Entry<std::string>* entry_ptr = (Entry<std::string>*) opt_idx->ptr.get();
                     HW::DefineGlobalFlag<std::string>(flag_names, entry_ptr->help,
-                                                      entry_ptr->value,
-                                                      [entry_ptr] (std::string v) {
-                                                          entry_ptr->configured = true;
-                                                      });
+                                                      entry_ptr->value, entry_ptr->setter);
                 }
                 break;
             case Types::MultiString:
-                {
-                    Entry<std::vector<std::string>>* entry_ptr = (Entry<std::vector<std::string>>*) opt_idx->ptr.get();
-                    HW::DefineGlobalFlag<std::vector<std::string>>(flag_names, entry_ptr->help,
-                                                      entry_ptr->value,
-                                                      [entry_ptr] (std::vector<std::string> v) {
-                                                          entry_ptr->configured = true;
-                                                      });
-                }
+                // Not supported by Horsewhisperer.
                 break;
-            default:
-                // Present because FlagType is not an enum class, and I don't trust
-                // compilers to warn/error about missing cases.
-                assert(false);
         }
     }
 }
@@ -626,102 +704,64 @@ void Configuration::parseConfigFile()
                 lth_loc::format("field '{1}' is not a valid configuration variable",
                                 key) };
 
-        if (opt_idx->ptr->configured)
-            continue;
-
         switch (opt_idx->ptr->type) {
             case Types::Int:
-                check_key_type(key, "Integer", lth_jc::DataType::Int);
-                HW::SetFlag<int>(key, config_json.get<int>(key));
+                {
+                    check_key_type(key, "Integer", lth_jc::DataType::Int);
+                    Entry<int>* entry_ptr = (Entry<int>*) opt_idx->ptr.get();
+                    auto val = config_json.get<int>(key);
+                    entry_ptr->setter(val);
+                }
                 break;
             case Types::Bool:
-                check_key_type(key, "Bool", lth_jc::DataType::Bool);
-                HW::SetFlag<bool>(key, config_json.get<bool>(key));
+                {
+                    check_key_type(key, "Bool", lth_jc::DataType::Bool);
+                    Entry<bool>* entry_ptr = (Entry<bool>*) opt_idx->ptr.get();
+                    auto val = config_json.get<bool>(key);
+                    entry_ptr->setter(val);
+                }
                 break;
             case Types::Double:
-                check_key_type(key, "Double", lth_jc::DataType::Double);
-                HW::SetFlag<double>(key, config_json.get<double>(key));
+                {
+                    check_key_type(key, "Double", lth_jc::DataType::Double);
+                    Entry<double>* entry_ptr = (Entry<double>*) opt_idx->ptr.get();
+                    auto val = config_json.get<double>(key);
+                    entry_ptr->setter(val);
+                }
                 break;
             case Types::String:
-                check_key_type(key, "String", lth_jc::DataType::String);
-                HW::SetFlag<std::string>(key, config_json.get<std::string>(key));
+                {
+                    check_key_type(key, "String", lth_jc::DataType::String);
+                    Entry<std::string>* entry_ptr = (Entry<std::string>*) opt_idx->ptr.get();
+                    auto val = config_json.get<std::string>(key);
+                    entry_ptr->setter(val);
+                }
                 break;
             case Types::MultiString:
-                check_key_type(key, "Array", lth_jc::DataType::Array);
-                HW::SetFlag<std::vector<std::string>>(key, config_json.get<std::vector<std::string>>(key));
+                {
+                    check_key_type(key, "Array", lth_jc::DataType::Array);
+                    Entry<std::vector<std::string>>* entry_ptr = (Entry<std::vector<std::string>>*) opt_idx->ptr.get();
+                    auto val = config_json.get<std::vector<std::string>>(key);
+                    entry_ptr->setter(val);
+                }
                 break;
-            default:
-                // Present because FlagType is not an enum class, and I don't trust
-                // compilers to warn/error about missing cases.
-                assert(false);
         }
     }
 }
 
-// Helper function
-std::string check_and_expand_ssl_cert(const std::string& cert_name)
-{
-    auto c = HW::GetFlag<std::string>(cert_name);
-    if (c.empty())
-        throw Configuration::Error {
-            lth_loc::format("{1} value must be defined", cert_name) };
-
-    c = lth_file::tilde_expand(c);
-    if (!fs::exists(c))
-        throw Configuration::Error {
-            lth_loc::format("{1} file '{2}' not found", cert_name, c) };
-
-    if (!lth_file::file_readable(c))
-        throw Configuration::Error {
-            lth_loc::format("{1} file '{2}' not readable", cert_name, c) };
-
-    return c;
-}
-
-static void validate_wss(std::string const& uri, std::string const& name)
-{
-    if (uri.find("wss://") != 0)
-        throw Configuration::Error {
-            lth_loc::format("{1} value \"{2}\" must start with wss://", name, uri) };
-}
-
 void Configuration::validateAndNormalizeWebsocketSettings()
 {
-    // Check the broker's WebSocket URI
-    auto broker_ws_uri = HW::GetFlag<std::string>("broker-ws-uri");
-    auto broker_ws_uris = HW::GetFlag<std::vector<std::string>>("broker-ws-uris");
-    if (broker_ws_uri.empty() && broker_ws_uris.empty())
+    if (agent_configuration_.broker_ws_uris.empty())
         throw Configuration::Error {
             lth_loc::translate("broker-ws-uris must be defined") };
-    if (!broker_ws_uri.empty() && !broker_ws_uris.empty())
-        throw Configuration::Error {
-            lth_loc::translate("broker-ws-uri and broker-ws-uris cannot both be defined") };
-
-    if (!broker_ws_uri.empty()) {
-        validate_wss(broker_ws_uri, "broker-ws-uri");
-    }
-
-    for (auto const& uri : broker_ws_uris) {
-        validate_wss(uri, "broker-ws-uris");
-    }
-
-    // Check the SSL options and expand the paths
-    auto ca   = check_and_expand_ssl_cert("ssl-ca-cert");
-    auto cert = check_and_expand_ssl_cert("ssl-cert");
-    auto key  = check_and_expand_ssl_cert("ssl-key");
 
     // Ensure client certs are good
     try {
-        PCPClient::getCommonNameFromCert(cert);
-        PCPClient::validatePrivateKeyCertPair(key, cert);
+        PCPClient::getCommonNameFromCert(agent_configuration_.crt);
+        PCPClient::validatePrivateKeyCertPair(agent_configuration_.key, agent_configuration_.crt);
     } catch (const PCPClient::connection_config_error& e) {
         throw Configuration::Error { e.what() };
     }
-
-    // Set the expanded cert paths
-    HW::SetFlag<std::string>("ssl-ca-cert", ca);
-    HW::SetFlag<std::string>("ssl-cert", cert);
-    HW::SetFlag<std::string>("ssl-key", key);
 }
 
 // Helper function
@@ -841,34 +881,6 @@ void Configuration::validateAndNormalizeOtherSettings()
         HW::SetFlag<std::string>("pidfile", pid_file);
     }
 #endif
-
-    try {
-        Timestamp(HW::GetFlag<std::string>("spool-dir-purge-ttl"));
-    } catch (const Timestamp::Error& e) {
-        throw Configuration::Error {
-            lth_loc::format("invalid spool-dir-purge-ttl: {1}", e.what()) };
-    }
-
-    if (HW::GetFlag<int>("association-timeout") < 0)
-        throw Configuration::Error {
-            lth_loc::translate("association-timeout must be positive") };
-
-    if (HW::GetFlag<int>("association-request-ttl") < 0)
-        throw Configuration::Error {
-                lth_loc::translate("association-request-ttl must be positive") };
-
-    if (HW::GetFlag<int>("pcp-message-ttl") < 0)
-        throw Configuration::Error {
-            lth_loc::translate("association-request-ttl must be positive") };
-}
-
-const Options::iterator Configuration::getDefaultIndex(const std::string& flagname)
-{
-    const auto& opt_idx = defaults_.get<Option::ByName>().find(flagname);
-    if (opt_idx == defaults_.get<Option::ByName>().end())
-        throw Configuration::Error {
-            lth_loc::format("no default value for {1}", flagname) };
-    return opt_idx;
 }
 
 std::string Configuration::getInvalidFlagError(const std::string& flagname)

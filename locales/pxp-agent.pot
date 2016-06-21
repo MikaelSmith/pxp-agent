@@ -178,11 +178,31 @@ msgid "Failed to open logfile stream"
 msgstr ""
 
 #: lib/src/configuration.cc
+msgid "{1} value \"{2}\" must start with wss://"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "{1} value must be defined"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "{1} file '{2}' not found"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "{1} file '{2}' not readable"
+msgstr ""
+
+#: lib/src/configuration.cc
 msgid "Config file, default: {1}"
 msgstr ""
 
 #: lib/src/configuration.cc
 msgid "WebSocket URI of the PCP broker"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "broker-ws-uri and broker-ws-uris cannot both be defined"
 msgstr ""
 
 #: lib/src/configuration.cc
@@ -192,6 +212,14 @@ msgstr ""
 
 #: lib/src/configuration.cc
 msgid "Timeout (in seconds) for starting the WebSocket handshake, default: 5 s"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "association-timeout must be positive"
+msgstr ""
+
+#: lib/src/configuration.cc
+msgid "association-request-ttl must be positive"
 msgstr ""
 
 #: lib/src/configuration.cc
@@ -233,6 +261,10 @@ msgid "TTL for action results before being deleted, default: '{1}' (days)"
 msgstr ""
 
 #: lib/src/configuration.cc
+msgid "invalid spool-dir-purge-ttl: {1}"
+msgstr ""
+
+#: lib/src/configuration.cc
 msgid "Don't daemonize, default: false"
 msgstr ""
 
@@ -253,27 +285,7 @@ msgid "field '{1}' is not a valid configuration variable"
 msgstr ""
 
 #: lib/src/configuration.cc
-msgid "{1} value must be defined"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "{1} file '{2}' not found"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "{1} file '{2}' not readable"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "{1} value \"{2}\" must start with wss://"
-msgstr ""
-
-#: lib/src/configuration.cc
 msgid "broker-ws-uris must be defined"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "broker-ws-uri and broker-ws-uris cannot both be defined"
 msgstr ""
 
 #. info
@@ -337,22 +349,6 @@ msgstr ""
 
 #: lib/src/configuration.cc
 msgid "the PID directory '{1}' does not exist; cannot create the PID file"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "invalid spool-dir-purge-ttl: {1}"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "association-timeout must be positive"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "association-request-ttl must be positive"
-msgstr ""
-
-#: lib/src/configuration.cc
-msgid "no default value for {1}"
 msgstr ""
 
 #: lib/src/configuration.cc
