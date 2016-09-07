@@ -683,13 +683,6 @@ std::string check_and_expand_ssl_cert(const std::string& cert_name)
     return c;
 }
 
-static void validate_wss(std::string const& uri, std::string const& name)
-{
-    if (uri.find("wss://") != 0)
-        throw Configuration::Error {
-            lth_loc::format("{1} value \"{2}\" must start with wss://", name, uri) };
-}
-
 void Configuration::validateAndNormalizeWebsocketSettings()
 {
     // Check the broker's WebSocket URI
@@ -698,13 +691,8 @@ void Configuration::validateAndNormalizeWebsocketSettings()
     // override whatever was in the config file.
     auto broker_ws_uri = HW::GetFlag<std::string>("broker-ws-uri");
     if (!broker_ws_uri.empty()) {
-        validate_wss(broker_ws_uri, "broker-ws-uri");
         broker_ws_uris_.clear();
         broker_ws_uris_.push_back(std::move(broker_ws_uri));
-    } else {
-        for (auto const& uri : broker_ws_uris_) {
-            validate_wss(uri, "broker-ws-uris");
-        }
     }
 
     if (broker_ws_uris_.empty())

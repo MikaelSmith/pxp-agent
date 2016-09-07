@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.2.2)
 
+# Find NATS
+find_path(NATS_INCLUDE_DIR nats.h)
+find_library(NATS_LIB nats_static)
+
 # Set include directories
 
 include_directories(
@@ -9,6 +13,7 @@ include_directories(
     ${HORSEWHISPERER_INCLUDE_DIRS}
     ${INIH_INCLUDE_DIRS}
     ${cpp-pcp-client_INCLUDE_DIR}
+    ${NATS_INCLUDE_DIR}
 )
 
 set(LIBRARY_COMMON_SOURCES
@@ -47,6 +52,7 @@ if (WIN32)
 endif()
 
 set (LIBS
+    ${NATS_LIB}
     ${cpp-pcp-client_LIBRARY}
     ${Boost_LIBRARIES}
     ${OPENSSL_SSL_LIBRARY}

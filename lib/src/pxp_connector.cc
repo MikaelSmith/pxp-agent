@@ -2,8 +2,8 @@
 #include <pxp-agent/pxp_schemas.hpp>
 #include <pxp-agent/agent.hpp>
 
-#include <cpp-pcp-client/connector/connector.hpp>
-#include <cpp-pcp-client/protocol/schemas.hpp>
+#include <cpp-pcp-client/connector/client_metadata.hpp>
+#include <cpp-pcp-client/connector/errors.hpp>
 
 #include <leatherman/util/thread.hpp>   // this_thread::sleep_for
 #include <leatherman/util/chrono.hpp>
@@ -16,98 +16,106 @@
 #include <cstdint>
 #include <random>
 
+#include <nats.h>
+
 namespace PXPAgent {
 
 namespace lth_jc = leatherman::json_container;
 namespace lth_util = leatherman::util;
 namespace lth_loc = leatherman::locale;
 
-// Pause between connection attempts after Association errors
-static const uint32_t ASSOCIATE_SESSION_TIMEOUT_PAUSE_S { 5 };
-
 PXPConnector::PXPConnector(const Configuration::Agent& agent_configuration)
     try
-        : pcp_message_ttl_s { agent_configuration.pcp_message_ttl_s },
-          pcp_connector_ { new PCPClient::Connector(agent_configuration.broker_ws_uris,
-                                                    agent_configuration.client_type,
-                                                    agent_configuration.ca,
-                                                    agent_configuration.crt,
-                                                    agent_configuration.key,
-                                                    agent_configuration.ws_connection_timeout_ms,
-                                                    agent_configuration.association_timeout_s,
-                                                    agent_configuration.association_request_ttl_s,
-                                                    agent_configuration.allowed_keepalive_timeouts+1) }
+        : conn_ { nullptr },
+          request_sub_ { nullptr },
+          broker_uris_ { agent_configuration.broker_ws_uris },
+          ca_ { agent_configuration.ca },
+          crt_ { agent_configuration.crt },
+          key_ { agent_configuration.key },
+          common_name_ { PCPClient::getCommonNameFromCert(crt_) },
+          connection_timeout_ms_ { agent_configuration.ws_connection_timeout_ms },
+          pong_timeouts_before_retry_ { agent_configuration.allowed_keepalive_timeouts+1 },
+          connected_ { false }
 {
+    LOG_INFO("Retrieved common name from the certificate: {1}", common_name_);
+    PCPClient::validatePrivateKeyCertPair(key_, crt_);
+    LOG_DEBUG("Validated the private key / certificate pair");
 } catch (const PCPClient::connection_config_error& e) {
     throw Agent::WebSocketConfigurationError { e.what() };
 }
 
+PXPConnector::~PXPConnector()
+{
+    if (request_sub_) {
+        natsSubscription_Destroy(request_sub_);
+    }
+
+    if (conn_) {
+        natsConnection_Destroy(conn_);
+    }
+}
+
 void PXPConnector::sendProvisionalResponse(const ActionRequest& request)
 {
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
     lth_jc::JsonContainer provisional_data {};
     provisional_data.set<std::string>("transaction_id", request.transactionId());
 
-    try {
-        pcp_connector_->send(std::vector<std::string> { request.sender() },
-                             PXPSchemas::PROVISIONAL_RESPONSE_TYPE,
-                             pcp_message_ttl_s,
-                             provisional_data,
-                             request.debug());
+    std::string data = provisional_data.toString();
+    auto s = natsConnection_Publish(conn_, request.sender().c_str(), data.c_str(), data.size());
+    if (s == NATS_OK) {
         LOG_INFO("Sent provisional response for the {1} by {2}",
                  request.prettyLabel(), request.sender());
-    } catch (PCPClient::connection_error& e) {
+    } else {
         LOG_ERROR("Failed to send provisional response for the {1} by {2} "
                   "(no further attempts will be made): {3}",
-                  request.prettyLabel(), request.sender(), e.what());
+                  request.prettyLabel(), request.sender(), natsStatus_GetText(s));
     }
 }
 
 void PXPConnector::sendPXPError(const ActionRequest& request,
                                 const std::string& description)
 {
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
     lth_jc::JsonContainer pxp_error_data {};
     pxp_error_data.set<std::string>("transaction_id", request.transactionId());
     pxp_error_data.set<std::string>("id", request.id());
     pxp_error_data.set<std::string>("description", description);
 
-    try {
-        pcp_connector_->send(std::vector<std::string> { request.sender() },
-                             PXPSchemas::PXP_ERROR_MSG_TYPE,
-                             pcp_message_ttl_s,
-                             pxp_error_data);
+    std::string data = pxp_error_data.toString();
+    auto s = natsConnection_Publish(conn_, request.sender().c_str(), data.c_str(), data.size());
+    if (s == NATS_OK) {
         LOG_INFO("Replied to {1} by {2}, request ID {3}, with a PXP error message",
                  request.prettyLabel(), request.sender(), request.id());
-    } catch (PCPClient::connection_error& e) {
+    } else {
         LOG_ERROR("Failed to send a PXP error message for the {1} by {2} "
-                  "(no further sending attempts will be made): {3}",
-                  request.prettyLabel(), request.sender(), description);
+                  "(no further sending attempts will be made): {3}\n{4}",
+                  request.prettyLabel(), request.sender(), natsStatus_GetText(s), description);
     }
 }
 
 void PXPConnector::sendPXPError(const ActionResponse& response)
 {
     assert(response.valid(ActionResponse::ResponseType::RPCError));
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
-    try {
-        pcp_connector_->send(std::vector<std::string> {
-                                 response.action_metadata.get<std::string>("requester") },
-                             PXPSchemas::PXP_ERROR_MSG_TYPE,
-                             pcp_message_ttl_s,
-                             response.toJSON(ActionResponse::ResponseType::RPCError));
+    std::string data = response.toJSON(ActionResponse::ResponseType::RPCError).toString();
+    auto requestor = response.action_metadata.get<std::string>("requester");
+    auto s = natsConnection_Publish(conn_, requestor.c_str(),
+                                    data.c_str(), data.size());
+    if (s == NATS_OK) {
         LOG_INFO("Replied to {1} by {2}, request ID {3}, with a PXP error message",
                  response.prettyRequestLabel(),
-                 response.action_metadata.get<std::string>("requester"),
+                 requestor,
                  response.action_metadata.get<std::string>("request_id"));
-    } catch (PCPClient::connection_error& e) {
+    } else {
         LOG_ERROR("Failed to send a PXP error message for the {1} by {2} "
-                  "(no further sending attempts will be made): {3}",
+                  "(no further sending attempts will be made): {3}\n{3}",
                   response.prettyRequestLabel(),
-                  response.action_metadata.get<std::string>("requester"),
+                  requestor,
+                  natsStatus_GetText(s),
                   response.action_metadata.get<std::string>("execution_error"));
     }
 }
@@ -116,7 +124,7 @@ void PXPConnector::sendBlockingResponse(const ActionResponse& response,
                                         const ActionRequest& request)
 {
     assert(response.valid(ActionResponse::ResponseType::Blocking));
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
     sendBlockingResponse_(ActionResponse::ResponseType::Blocking,
                           response,
@@ -127,7 +135,7 @@ void PXPConnector::sendStatusResponse(const ActionResponse& response,
                                       const ActionRequest& request)
 {
     assert(response.valid(ActionResponse::ResponseType::StatusOutput));
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
     sendBlockingResponse_(ActionResponse::ResponseType::StatusOutput,
                           response,
@@ -138,96 +146,133 @@ void PXPConnector::sendNonBlockingResponse(const ActionResponse& response)
 {
     assert(response.valid(ActionResponse::ResponseType::NonBlocking));
     assert(response.action_metadata.get<std::string>("status") != "undetermined");
-    assert(pcp_connector_);
+    assert(conn_ && request_sub_);
 
-    try {
-        // NOTE(ale): assuming debug was sent in provisional response
-        pcp_connector_->send(std::vector<std::string> {
-                                 response.action_metadata.get<std::string>("requester") },
-                             PXPSchemas::NON_BLOCKING_RESPONSE_TYPE,
-                             pcp_message_ttl_s,
-                             response.toJSON(ActionResponse::ResponseType::NonBlocking));
+    std::string data = response.toJSON(ActionResponse::ResponseType::NonBlocking).toString();
+    auto requestor = response.action_metadata.get<std::string>("requester");
+    auto s = natsConnection_Publish(conn_, requestor.c_str(),
+                                    data.c_str(), data.size());
+    if (s == NATS_OK) {
         LOG_INFO("Sent response for the {1} by {2}",
                  response.prettyRequestLabel(),
                  response.action_metadata.get<std::string>("requester"));
-    } catch (PCPClient::connection_error& e) {
+    } else {
         LOG_ERROR("Failed to reply to {1} by {2}, (no further attempts will "
                   "be made): {3}",
                   response.prettyRequestLabel(),
                   response.action_metadata.get<std::string>("requester"),
-                  e.what());
+                  natsStatus_GetText(s));
     }
+}
+
+void PXPConnector::dispatchMsg(std::string subj, std::string reply, lth_jc::JsonContainer data)
+{
+    MessageCallback cb;
+    for (auto &p : callbacks_) {
+        try {
+            validator_.validate(data, p.first);
+            LOG_DEBUG("Matched message type {1}", p.first);
+            cb = p.second;
+            break;
+        } catch (lth_jc::validator_error& e) {
+            LOG_DEBUG("Message not of type {1}", p.first);
+        }
+    }
+
+    if (cb) {
+        cb(std::move(subj), std::move(reply), std::move(data), {});
+    } else {
+        LOG_ERROR("Message did not match a known schema: {1}");
+    }
+}
+
+static void onMsg(natsConnection *nc, natsSubscription *sub, natsMsg *msg, void *_conn)
+{
+    auto conn = reinterpret_cast<PXPConnector*>(_conn);
+
+    std::string data(natsMsg_GetData(msg), natsMsg_GetDataLength(msg));
+    std::string subj = natsMsg_GetSubject(msg);
+    std::string reply = natsMsg_GetReply(msg);
+    natsMsg_Destroy(msg);
+
+    LOG_INFO("Received msg: {1}:{2} - {3}", subj, reply, data);
+
+    if (reply.empty()) {
+        LOG_ERROR("Unable to handle message without reply queue specified");
+        return;
+    }
+
+    try {
+        conn->dispatchMsg(std::move(subj), std::move(reply), lth_jc::JsonContainer(data));
+    } catch (const lth_jc::data_parse_error& e) {
+        LOG_ERROR("Invalid JSON content: {1}", e.what());
+    }
+}
+
+static void onConn(natsConnection *nc, void *closure)
+{
+    LOG_INFO("Connected");
+    *reinterpret_cast<bool*>(closure) = true;
+}
+
+static void onDisc(natsConnection *nc, void *closure)
+{
+    LOG_INFO("Disconnected");
+    *reinterpret_cast<bool*>(closure) = false;
+    LOG_INFO("Connecting...");
 }
 
 void PXPConnector::connect()
 {
-    assert(pcp_connector_);
+    std::vector<const char*> servers;
+    for (auto &uri : broker_uris_) {
+        servers.push_back(uri.c_str());
+    }
 
-    int num_seconds {};
-    std::random_device rd {};
-    std::default_random_engine engine { rd() };
-    std::uniform_int_distribution<int> dist { ASSOCIATE_SESSION_TIMEOUT_PAUSE_S,
-                                              2 * ASSOCIATE_SESSION_TIMEOUT_PAUSE_S };
+    // TODO: Handle errors
+    natsOptions *opts = nullptr;
+    natsOptions_Create(&opts);
+    natsOptions_SetServers(opts, servers.data(), servers.size());
+    natsOptions_SetReconnectWait(opts, 2000);
+    natsOptions_SetMaxPingsOut(opts, pong_timeouts_before_retry_);
+    natsOptions_SetPingInterval(opts, 15000);
+    natsOptions_SetTimeout(opts, connection_timeout_ms_);
 
-    try {
-        do {
-            try {
-                pcp_connector_->connect();
-                break;
-            } catch (const PCPClient::connection_association_error& e) {
-                num_seconds = dist(engine);
-                LOG_WARNING("Error during the PCP Session Association ({1}); "
-                            "will retry to connect in {2} s",
-                            e.what(), num_seconds);
-                lth_util::this_thread::sleep_for(
-                    lth_util::chrono::seconds(num_seconds));
-            }
-        } while (true);
+    natsOptions_SetSecure(opts, true);
+    // TODO: Figure out how to handle expected hostname with multiple servers.
+    //natsOptions_SetExpectedHostname(opts, "broker.example.com");
+    natsOptions_LoadCATrustedCertificates(opts, ca_.c_str());
+    natsOptions_LoadCertificatesChain(opts, crt_.c_str(), key_.c_str());
 
-        // The agent is now connected and the request handlers are
-        // set; we can now call the monitoring method that will block
-        // this thread of execution.
-        // Note that, in case the underlying connection drops, the
-        // connector will keep trying to re-establish it indefinitely
-        // (the max_connect_attempts is 0 by default).
-        LOG_DEBUG("PCP connection established; about to start monitoring it");
-        pcp_connector_->monitorConnection();
-    } catch (const PCPClient::connection_config_error& e) {
-        // WebSocket configuration failure
-        throw Agent::WebSocketConfigurationError { e.what() };
-    } catch (const PCPClient::connection_association_response_failure& e) {
-        // Associate Session failure; this should be due to a
-        // configuration mismatch with the broker (incompatible
-        // PCP versions?)
-        throw Agent::ConfigurationError { e.what() };
-    } catch (const PCPClient::connection_fatal_error& e) {
-        // Unexpected, as we're not limiting the num retries, for
-        // both connect() and monitorConnection() calls
-        throw Agent::FatalError { e.what() };
+    natsOptions_SetDisconnectedCB(opts, onDisc, &connected_);
+    natsOptions_SetReconnectedCB(opts, onConn, &connected_);
+
+    auto stat = natsConnection_Connect(&conn_, opts);
+    while (stat == NATS_NO_SERVER) {
+        LOG_INFO("Server unavailable, retrying again in 2 seconds");
+        nats_Sleep(2000);
+        stat = natsConnection_Connect(&conn_, opts);
+    }
+
+    if (stat != NATS_OK) {
+        LOG_WARNING("NATS error: {1}", natsStatus_GetText(stat));
+        return;
+    }
+    LOG_INFO("Connected");
+
+    connected_ = true;
+    LOG_INFO("Subscribing to queue {1}", common_name_);
+    natsConnection_Subscribe(&request_sub_, conn_, common_name_.c_str(), onMsg, this);
+    while (true) {
+        nats_Sleep(5000);
     }
 }
 
-void PXPConnector::registerMessageCallback(const leatherman::json_container::Schema& schema,
+void PXPConnector::registerMessageCallback(leatherman::json_container::Schema schema,
                                            MessageCallback callback)
 {
-    assert(pcp_connector_);
-
-    pcp_connector_->registerMessageCallback(
-        schema,
-        [this, callback](const PCPClient::ParsedChunks& parsed_chunks) {
-            auto id = parsed_chunks.envelope.get<std::string>("id");
-            auto sender = parsed_chunks.envelope.get<std::string>("sender");
-            if (validateFormat_(id, sender, parsed_chunks)) {
-                if (parsed_chunks.num_invalid_debug) {
-                    LOG_WARNING(lth_loc::format_n(
-                            "Message {1} contained {2} bad debug chunk",
-                            "Message {1} contained {2} bad debug chunks",
-                            parsed_chunks.num_invalid_debug, parsed_chunks.num_invalid_debug, id));
-                }
-
-                callback(id, sender, parsed_chunks.data, parsed_chunks.debug);
-            }
-        });
+    callbacks_.push_back(std::make_pair(schema.getName(), std::move(callback)));
+    validator_.registerSchema(std::move(schema));
 }
 
 
@@ -240,62 +285,14 @@ void PXPConnector::sendBlockingResponse_(
         const ActionResponse& response,
         const ActionRequest& request)
 {
-    try {
-        pcp_connector_->send(std::vector<std::string> { request.sender() },
-                             PXPSchemas::BLOCKING_RESPONSE_TYPE,
-                             pcp_message_ttl_s,
-                             response.toJSON(response_type),
-                             request.debug());
-        LOG_INFO("Sent response for the {1} by {2}",
-                 request.prettyLabel(), request.sender());
-    } catch (PCPClient::connection_error& e) {
+    std::string data = response.toJSON(response_type).toString();
+    auto s = natsConnection_Publish(conn_, request.sender().c_str(), data.c_str(), data.size());
+    if (s == NATS_OK) {
+        LOG_INFO("Sent response for the message for {1} by {2}", request.prettyLabel(), request.sender());
+    } else {
         LOG_ERROR("Failed to reply to the {1} by {2}: {3}",
-                  request.prettyLabel(), request.sender(), e.what());
+                  request.prettyLabel(), request.sender(), natsStatus_GetText(s));
     }
-}
-
-void PXPConnector::sendPCPError_(const std::string& request_id,
-                                 const std::string& description,
-                                 const std::vector<std::string>& endpoints)
-{
-    lth_jc::JsonContainer pcp_error_data {};
-    pcp_error_data.set<std::string>("id", request_id);
-    pcp_error_data.set<std::string>("description", description);
-
-    try {
-        pcp_connector_->send(endpoints,
-                             PCPClient::Protocol::ERROR_MSG_TYPE,
-                             pcp_message_ttl_s,
-                             pcp_error_data);
-        LOG_INFO("Replied to request {1} with a PCP error message",
-                 request_id);
-    } catch (PCPClient::connection_error& e) {
-        LOG_ERROR("Failed to send PCP error message for request {1}: {2}",
-                  request_id, e.what());
-    }
-}
-
-bool PXPConnector::validateFormat_(const std::string& id,
-                                   const std::string& sender,
-                                   const PCPClient::ParsedChunks& parsed_chunks) {
-    std::string errmsg;
-    if (!parsed_chunks.has_data)
-        errmsg = lth_loc::translate("no data");
-    if (parsed_chunks.invalid_data)
-        errmsg = lth_loc::translate("invalid data");
-    // NOTE(ale): currently, we don't support ContentType::Binary
-    if (parsed_chunks.data_type != lth_jc::ContentType::Json)
-        errmsg = lth_loc::translate("data is not in JSON format");
-
-    if (errmsg.empty())
-        return true;
-
-    // Message was not a valid action, send a *PCP error*
-    std::vector<std::string> endpoints { sender };
-    LOG_ERROR("Invalid request with ID {1} by {2}. Will reply with a PCP "
-              "error. Error: {3}", id, sender, errmsg);
-    sendPCPError_(id, errmsg, endpoints);
-    return false;
 }
 
 }  // namesapce PXPAgent

@@ -12,6 +12,7 @@
 #include <pxp-agent/configuration.hpp>
 
 #include <leatherman/json_container/json_container.hpp>
+#include <leatherman/json_container/validator.hpp>
 #include <leatherman/json_container/schema.hpp>
 
 #include <cassert>
@@ -21,9 +22,10 @@
 #include <string>
 #include <functional>
 
-namespace PCPClient {
-    class Connector;
-    struct ParsedChunks;
+extern "C" {
+    struct __natsConnection;
+    struct __natsSubscription;
+    struct __natsMsg;
 }
 
 namespace PXPAgent {
@@ -38,6 +40,7 @@ class PXPConnector {
                                                std::vector<leatherman::json_container::JsonContainer> debug)>;
 
     PXPConnector(const Configuration::Agent& agent_configuration);
+    ~PXPConnector();
 
     TEST_VIRTUAL_SPECIFIER void sendProvisionalResponse(const ActionRequest& request);
 
@@ -61,24 +64,27 @@ class PXPConnector {
     // Establishes a connection
     TEST_VIRTUAL_SPECIFIER void connect();
 
-    TEST_VIRTUAL_SPECIFIER void registerMessageCallback(const leatherman::json_container::Schema& schema,
+    TEST_VIRTUAL_SPECIFIER void dispatchMsg(std::string subj,
+                                            std::string reply,
+                                            leatherman::json_container::JsonContainer data);
+
+    TEST_VIRTUAL_SPECIFIER void registerMessageCallback(leatherman::json_container::Schema schema,
                                                         MessageCallback callback);
 
   private:
-    uint32_t pcp_message_ttl_s;
-    std::shared_ptr<PCPClient::Connector> pcp_connector_;
+    __natsConnection *conn_;
+    __natsSubscription *request_sub_;
+    std::vector<std::string> broker_uris_;
+    std::string ca_, crt_, key_, common_name_;
+    int64_t connection_timeout_ms_;
+    uint32_t pong_timeouts_before_retry_;
+    bool connected_;
+    std::vector<std::pair<std::string, MessageCallback>> callbacks_;
+    leatherman::json_container::Validator validator_;
 
     void sendBlockingResponse_(const ActionResponse::ResponseType& response_type,
                                const ActionResponse& response,
                                const ActionRequest& request);
-
-    void sendPCPError_(const std::string& request_id,
-                       const std::string& description,
-                       const std::vector<std::string>& endpoints);
-
-    bool validateFormat_(const std::string& id,
-                         const std::string& sender,
-                         const PCPClient::ParsedChunks& parsed_chunks);
 };
 
 }  // namespace PXPAgent
