@@ -102,7 +102,7 @@ class RequestProcessor {
     /// To manage the streaming output watcher
     std::unique_ptr<PCPClient::Util::thread> streaming_thread_ptr_;
     PCPClient::Util::mutex streaming_mutex_;
-    std::map<std::string, size_t> streaming_indices_;
+    std::map<std::string, std::pair<std::string, size_t>> streaming_indices_;
 
     /// Throw a RequestProcessor::Error in case of unknown module,
     /// unknown action, or if the requested input parameters entry
@@ -140,7 +140,8 @@ class RequestProcessor {
 
     /// Registers an action to watch for streaming updates with the
     /// streaming threading
-    void registerStreamingAction(const std::string& transaction_id);
+    void registerStreamingAction(const std::string& transaction_id,
+                                 const std::string& sender);
 
     /// Removes the idx file and stops watching for updates on an action
     void unregisterStreamingAction(const std::string& transaction_id);

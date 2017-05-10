@@ -53,6 +53,14 @@ PCPClient::Schema ProvisionalResponseSchema() {
     return schema;
 }
 
+PCPClient::Schema StreamingUpdateSchema() {
+    PCPClient::Schema schema { STREAMING_UPDATE_TYPE, C_Type::Json };
+    // NB: additionalProperties = false
+    schema.addConstraint("transaction_id", T_Constraint::String, true);
+    schema.addConstraint("update", T_Constraint::String, true);
+    return schema;
+}
+
 PCPClient::Schema PXPErrorSchema() {
     PCPClient::Schema schema { PXP_ERROR_MSG_TYPE, C_Type::Json };
     // NB: additionalProperties = false

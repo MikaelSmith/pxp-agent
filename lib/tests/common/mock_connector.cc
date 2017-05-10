@@ -49,6 +49,12 @@ void MockConnector::sendProvisionalResponse(const ActionRequest&)
     sent_provisional_response = true;
 }
 
+void MockConnector::sendStreamingUpdate(const std::string&,
+                                        const std::string&,
+                                        const std::string&)
+{
+}
+
 void MockConnector::connect(int max_connect_attempts)
 {
     throw MockConnector::pxpError_msg {};

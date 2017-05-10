@@ -21,6 +21,10 @@ class PXPConnectorV1 : public PCPClient::v1::Connector, public PXPConnector {
 
     void sendProvisionalResponse(const ActionRequest& request) override;
 
+    void sendStreamingUpdate(const std::string& transaction_id,
+                             const std::string& sender,
+                             const std::string& update) override;
+
     void sendPXPError(const ActionRequest& request,
                       const std::string& description) override;
 

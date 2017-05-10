@@ -43,6 +43,10 @@ class PXPConnector {
 
     virtual void sendProvisionalResponse(const ActionRequest& request) = 0;
 
+    virtual void sendStreamingUpdate(const std::string& transaction_id,
+                                     const std::string& sender,
+                                     const std::string& update) = 0;
+
     virtual void connect(int max_connect_attempts = 0) = 0;
 
     virtual void monitorConnection(uint32_t max_connect_attempts = 0,

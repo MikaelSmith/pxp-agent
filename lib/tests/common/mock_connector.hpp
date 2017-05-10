@@ -88,6 +88,10 @@ class MockConnector : public PXPConnector {
 
     void sendProvisionalResponse(const ActionRequest&) override;
 
+    void sendStreamingUpdate(const std::string&,
+                             const std::string&,
+                             const std::string&) override;
+
     void connect(int max_connect_attempts = 0) override;
 
     void monitorConnection(uint32_t max_connect_attempts = 0,

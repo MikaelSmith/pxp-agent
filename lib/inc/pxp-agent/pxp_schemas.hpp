@@ -21,9 +21,12 @@ static const std::string NON_BLOCKING_RESPONSE_TYPE {
     "http://puppetlabs.com/rpc_non_blocking_response" };
 static const std::string PROVISIONAL_RESPONSE_TYPE  {
     "http://puppetlabs.com/rpc_provisional_response" };
+static const std::string STREAMING_UPDATE_TYPE  {
+    "http://puppetlabs.com/rpc_streaming_update" };
 PCPClient::Schema NonBlockingRequestSchema();
 PCPClient::Schema NonBlockingResponseSchema();
 PCPClient::Schema ProvisionalResponseSchema();
+PCPClient::Schema StreamingUpdateSchema();
 
 // PXP error
 static const std::string PXP_ERROR_MSG_TYPE {

@@ -661,6 +661,20 @@ msgstr ""
 #. info
 #: lib/src/pxp_connector_v1.cc
 #: lib/src/pxp_connector_v2.cc
+msgid "Sent streaming update for the {1} by {2}"
+msgstr ""
+
+#. error
+#: lib/src/pxp_connector_v1.cc
+#: lib/src/pxp_connector_v2.cc
+msgid ""
+"Failed to send streaming update for the {1} by {2} (no further attempts will "
+"be made): {3}"
+msgstr ""
+
+#. info
+#: lib/src/pxp_connector_v1.cc
+#: lib/src/pxp_connector_v2.cc
 msgid "Replied to {1} by {2}, request ID {3}, with a PXP error message"
 msgstr ""
 

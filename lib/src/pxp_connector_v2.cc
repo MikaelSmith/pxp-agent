@@ -61,6 +61,27 @@ void PXPConnectorV2::sendProvisionalResponse(const ActionRequest& request)
     }
 }
 
+void PXPConnectorV2::sendStreamingUpdate(const std::string& transaction_id,
+                                         const std::string& sender,
+                                         const std::string& update)
+{
+    lth_jc::JsonContainer pxp_update_data {};
+    pxp_update_data.set<std::string>("transaction_id", transaction_id);
+    pxp_update_data.set<std::string>("update", update);
+
+    try {
+        send(sender,
+             PXPSchemas::STREAMING_UPDATE_TYPE,
+             pxp_update_data);
+        LOG_INFO("Sent streaming update for the {1} by {2}",
+                 transaction_id, sender);
+    } catch (PCPClient::connection_error& e) {
+        LOG_ERROR("Failed to send streaming update for the {1} by {2} "
+                  "(no further attempts will be made): {3}",
+                  transaction_id, sender, e.what());
+    }
+}
+
 void PXPConnectorV2::sendPXPError(const ActionRequest& request,
                                   const std::string& description)
 {

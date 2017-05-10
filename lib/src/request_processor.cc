@@ -150,6 +150,8 @@ void nonBlockingActionTask(std::shared_ptr<Module> module_ptr,
         }
     }
 
+    // TODO: unregisterStreamingAction
+
     try {
         storage_ptr->updateMetadataFile(request.transactionId(),
                                         response.action_metadata);
@@ -398,7 +400,7 @@ void RequestProcessor::processNonBlockingRequest(const ActionRequest& request)
                 auto done = std::make_shared<std::atomic<bool>>(false);
 
                 // Register a watch for streaming updates from the action.
-                registerStreamingAction(request.transactionId());
+                registerStreamingAction(request.transactionId(), request.sender());
 
                 // NB: we got the_lock, so we're sure this will not throw
                 // due to another stored thread with the same name
@@ -938,11 +940,12 @@ void RequestProcessor::spoolDirPurgeTask()
 // Streaming output watcher
 //
 
-void RequestProcessor::registerStreamingAction(const std::string& transaction_id)
+void RequestProcessor::registerStreamingAction(const std::string& transaction_id,
+                                               const std::string& sender)
 {
     storage_ptr_->updateStreamIndex(transaction_id, 0);
     pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
-    streaming_indices_.emplace(transaction_id, 0);
+    streaming_indices_.emplace(transaction_id, std::make_pair(sender, 0));
 }
 
 void RequestProcessor::unregisterStreamingAction(const std::string& transaction_id)
@@ -968,7 +971,7 @@ void RequestProcessor::streamingWatcherTask()
             pcp_util::chrono::milliseconds(1000));
 
         // Take a snapshot of actions to watch.
-        std::map<std::string, size_t> indices;
+        std::map<std::string, std::pair<std::string, size_t>> indices;
         {
             pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
             indices = streaming_indices_;
@@ -976,23 +979,26 @@ void RequestProcessor::streamingWatcherTask()
 
         for (auto &kv : indices) {
             std::string update;
-            std::tie(kv.second, update) = storage_ptr_->readLatest(kv.first, kv.second);
+            size_t new_idx;
+            std::tie(new_idx, update) = storage_ptr_->readLatest(kv.first, kv.second.second);
 
             if (!update.empty()) {
                 LOG_DEBUG("Received update for {1}:\n{2}", kv.first, update)
-                // Update index in the main store and on disk.
+                // Update index in the main store and on disk. Do this before sending the update
+                // because we don't make guarantees about delivering the update. We opt instead
+                // to avoid sending duplicate updates.
                 {
                     pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
                     auto orig = streaming_indices_.find(kv.first);
                     if (orig != streaming_indices_.end()) {
                         // Only update the index if we're still tracking the file.
-                        storage_ptr_->updateStreamIndex(kv.first, kv.second);
-                        orig->second = kv.second;
+                        storage_ptr_->updateStreamIndex(kv.first, new_idx);
+                        orig->second.second = new_idx;
                     }
                 }
+                LOG_TRACE("Advanced streaming index for {1} to {2}", kv.first, new_idx);
 
-                // TODO: send new PXP message type with update
-                LOG_TRACE("Advanced streaming index for {1} to {2}", kv.first, kv.second);
+                connector_ptr_->sendStreamingUpdate(kv.first, kv.second.first, update);
             }
         }
     }

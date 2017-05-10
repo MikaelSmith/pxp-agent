@@ -208,6 +208,7 @@ ActionOutput ResultsStorage::getOutput(const std::string& transaction_id,
 void ResultsStorage::updateStreamIndex(const std::string& transaction_id, size_t idx)
 {
     auto results_path = (spool_dir_path_ / transaction_id / IDX);
+    // TODO: switch to atomic updates, so the file isn't left corrupt if the process terminates
     boost::nowide::ofstream idx_file(results_path.string());
     idx_file << idx;
 }
