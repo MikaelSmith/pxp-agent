@@ -99,6 +99,11 @@ class RequestProcessor {
     /// Flag; set to true if the dtor has been called
     bool is_destructing_;
 
+    /// To manage the streaming output watcher
+    std::unique_ptr<PCPClient::Util::thread> streaming_thread_ptr_;
+    PCPClient::Util::mutex streaming_mutex_;
+    std::map<std::string, size_t> streaming_indices_;
+
     /// Throw a RequestProcessor::Error in case of unknown module,
     /// unknown action, or if the requested input parameters entry
     /// does not match the JSON schema defined for the relevant action
@@ -132,6 +137,16 @@ class RequestProcessor {
     /// Spool directory purge task; the purge call will be triggered
     /// in intervals of (TTL + TTL * 1.2) duration
     void spoolDirPurgeTask();
+
+    /// Registers an action to watch for streaming updates with the
+    /// streaming threading
+    void registerStreamingAction(const std::string& transaction_id);
+
+    /// Removes the idx file and stops watching for updates on an action
+    void unregisterStreamingAction(const std::string& transaction_id);
+
+    /// Watch actions for streaming output and send over PXP
+    void streamingWatcherTask();
 };
 
 }  // namespace PXPAgent

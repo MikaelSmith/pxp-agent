@@ -177,7 +177,10 @@ RequestProcessor::RequestProcessor(std::shared_ptr<PXPConnector> connector_ptr,
           spool_dir_purge_thread_ptr_ { nullptr },
           spool_dir_purge_mutex_ {},
           spool_dir_purge_cond_var_ {},
-          is_destructing_ { false }
+          is_destructing_ { false },
+          streaming_thread_ptr_ { nullptr },
+          streaming_mutex_ {},
+          streaming_indices_ {}
 {
     assert(!spool_dir_path_.string().empty());
     loadModulesConfiguration();
@@ -198,6 +201,9 @@ RequestProcessor::RequestProcessor(std::shared_ptr<PXPConnector> connector_ptr,
         spool_dir_purge_thread_ptr_.reset(
             new pcp_util::thread(&RequestProcessor::spoolDirPurgeTask, this));
     }
+
+    streaming_thread_ptr_.reset(
+        new pcp_util::thread(&RequestProcessor::streamingWatcherTask, this));
 }
 
 RequestProcessor::~RequestProcessor()
@@ -390,6 +396,9 @@ void RequestProcessor::processNonBlockingRequest(const ActionRequest& request)
 
                 // Flag to enable signaling from task to thread_container
                 auto done = std::make_shared<std::atomic<bool>>(false);
+
+                // Register a watch for streaming updates from the action.
+                registerStreamingAction(request.transactionId());
 
                 // NB: we got the_lock, so we're sure this will not throw
                 // due to another stored thread with the same name
@@ -922,6 +931,70 @@ void RequestProcessor::spoolDirPurgeTask()
 
         storage_ptr_->purge(spool_dir_purge_ttl_,
                             thread_container_.getThreadNames());
+    }
+}
+
+//
+// Streaming output watcher
+//
+
+void RequestProcessor::registerStreamingAction(const std::string& transaction_id)
+{
+    storage_ptr_->updateStreamIndex(transaction_id, 0);
+    pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
+    streaming_indices_.emplace(transaction_id, 0);
+}
+
+void RequestProcessor::unregisterStreamingAction(const std::string& transaction_id)
+{
+    pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
+    storage_ptr_->clearStreamIndex(transaction_id);
+    streaming_indices_.erase(transaction_id);
+}
+
+// The watcher thread monitors each action, watching for updates in the "stream" file. It uses
+// a separate file to track its current location in the file (a count of the file size, so it can
+// check for changes via a stat call). Any time more is read from the stream file, the latest
+// location is written to the idx file; it should only need to be re-read if pxp-agent restarts.
+// On restart, actions should only be watched if they have a idx file; when the action completes,
+// the idx file should be removed.
+void RequestProcessor::streamingWatcherTask()
+{
+    LOG_DEBUG("Starting streaming watcher task");
+
+    // TODO: On startup, search for any idx files
+    while (true) {
+        pcp_util::this_thread::sleep_for(
+            pcp_util::chrono::milliseconds(1000));
+
+        // Take a snapshot of actions to watch.
+        std::map<std::string, size_t> indices;
+        {
+            pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
+            indices = streaming_indices_;
+        }
+
+        for (auto &kv : indices) {
+            std::string update;
+            std::tie(kv.second, update) = storage_ptr_->readLatest(kv.first, kv.second);
+
+            if (!update.empty()) {
+                LOG_DEBUG("Received update for {1}:\n{2}", kv.first, update)
+                // Update index in the main store and on disk.
+                {
+                    pcp_util::lock_guard<pcp_util::mutex> the_lock { streaming_mutex_ };
+                    auto orig = streaming_indices_.find(kv.first);
+                    if (orig != streaming_indices_.end()) {
+                        // Only update the index if we're still tracking the file.
+                        storage_ptr_->updateStreamIndex(kv.first, kv.second);
+                        orig->second = kv.second;
+                    }
+                }
+
+                // TODO: send new PXP message type with update
+                LOG_TRACE("Advanced streaming index for {1} to {2}", kv.first, kv.second);
+            }
+        }
     }
 }
 

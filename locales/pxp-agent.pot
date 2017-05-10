@@ -1019,6 +1019,18 @@ msgid ""
 "id {2}"
 msgstr ""
 
+#. debug
+#: lib/src/request_processor.cc
+msgid "Starting streaming watcher task"
+msgstr ""
+
+#. debug
+#: lib/src/request_processor.cc
+msgid ""
+"Received update for {1}:\n"
+"{2}"
+msgstr ""
+
 #: lib/src/results_mutex.cc
 msgid "does not exists"
 msgstr ""

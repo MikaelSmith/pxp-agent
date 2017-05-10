@@ -81,6 +81,19 @@ class ResultsStorage {
     ActionOutput getOutput(const std::string& transaction_id,
                            int exitcode);
 
+    // Updates the index for a transactions streaming output.
+    void updateStreamIndex(const std::string& transaction_id, size_t idx);
+
+    // Delete the streaming index file.
+    void clearStreamIndex(const std::string& transaction_id);
+
+    // Reads the index for a transactions streaming output.
+    size_t getStreamIndex(const std::string& transaction_id);
+
+    // Read all contents from streaming output after the idx.
+    // Returns the new idx and any content read.
+    std::tuple<size_t, std::string> readLatest(const std::string& transaction_id, size_t idx);
+
     // Cleans up the spool directory by removing the results
     // directories that are older than the specified ttl and skipping
     // the directories related to ongoing tasks.

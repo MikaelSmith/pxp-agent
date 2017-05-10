@@ -342,7 +342,7 @@ describe "pxp-module-puppet" do
       allow(File).to receive(:exist?).and_return(true)
       allow_any_instance_of(Object).to receive(:running?).and_return(false)
       allow_any_instance_of(Object).to receive(:disabled?).and_return(false)
-      expect_any_instance_of(Object).to receive(:start_run).with(expected_input)
+      expect_any_instance_of(Object).to receive(:start_run).with(expected_input, nil)
       action_run({"configuration" => default_configuration, "input" => default_input}.to_json)
     end
 
@@ -361,7 +361,7 @@ describe "pxp-module-puppet" do
       allow(File).to receive(:exist?).and_return(true)
       allow_any_instance_of(Object).to receive(:running?).and_return(false)
       allow_any_instance_of(Object).to receive(:disabled?).and_return(false)
-      expect_any_instance_of(Object).to receive(:start_run).with(expected_input)
+      expect_any_instance_of(Object).to receive(:start_run).with(expected_input, nil)
       action_run({"configuration" => default_configuration, "input" => passed_input}.to_json)
     end
 
@@ -372,7 +372,7 @@ describe "pxp-module-puppet" do
       allow(File).to receive(:exist?).and_return(true)
       allow_any_instance_of(Object).to receive(:running?).and_return(false)
       allow_any_instance_of(Object).to receive(:disabled?).and_return(false)
-      expect_any_instance_of(Object).to receive(:start_run).with(expected_input)
+      expect_any_instance_of(Object).to receive(:start_run).with(expected_input, nil)
       action_run({"configuration" => default_configuration, "input" => passed_input}.to_json)
     end
 
@@ -385,7 +385,7 @@ describe "pxp-module-puppet" do
       allow(File).to receive(:exist?).and_return(true)
       allow_any_instance_of(Object).to receive(:running?).and_return(false)
       allow_any_instance_of(Object).to receive(:disabled?).and_return(false)
-      expect_any_instance_of(Object).to receive(:start_run).with(expected_input)
+      expect_any_instance_of(Object).to receive(:start_run).with(expected_input, nil)
       action_run({"configuration" => default_configuration, "input" => passed_input}.to_json)
     end
 

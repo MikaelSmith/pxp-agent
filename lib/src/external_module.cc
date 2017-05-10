@@ -300,6 +300,7 @@ std::string ExternalModule::getActionArguments(const ActionRequest& request)
         lth_jc::JsonContainer output_files {};
         output_files.set<std::string>("stdout", (r_d_p / "stdout").string());
         output_files.set<std::string>("stderr", (r_d_p / "stderr").string());
+        output_files.set<std::string>("stream", (r_d_p / "stream").string());
         output_files.set<std::string>("exitcode", (r_d_p / "exitcode").string());
         action_args.set<lth_jc::JsonContainer>("output_files", output_files);
     }

@@ -87,7 +87,7 @@ def wait_for_lockfile(lockfile = '', check_interval = 0.1, give_up_after = 30)
   end
 end
 
-def start_run(action_input)
+def start_run(action_input, stream = nil)
   exitcode = DEFAULT_EXITCODE
   cmd = Puppet::Util::CommandLine.new('agent', action_input['flags'])
   Puppet.initialize_settings(cmd.args)
@@ -102,6 +102,8 @@ def start_run(action_input)
 
     begin
       report = Puppet::Transaction::Report.new("apply", nil, Puppet[:environment], transaction_uuid)
+      # TODO: create a Report object that performs a callback every time a report entry is added.
+      Puppet::Util::Log.newdestination(stream) if stream
       exitcode = agent.run(:report => report, :transaction_uuid => transaction_uuid)
     rescue => e
       return make_error_result(exitcode, Errors::FailedToStart,
@@ -282,6 +284,7 @@ def action_run(input)
 
   output_files = args["output_files"]
   if output_files
+    stream = output_files['stream']
     begin
       $stdout.reopen(File.open(output_files["stdout"], 'w'))
       $stderr.reopen(File.open(output_files["stderr"], 'w'))
@@ -324,7 +327,7 @@ def action_run(input)
     return make_error_result(DEFAULT_EXITCODE, e.error_type, e.message)
   end
 
-  start_run(action_input)
+  start_run(action_input, stream)
 end
 
 if __FILE__ == $0

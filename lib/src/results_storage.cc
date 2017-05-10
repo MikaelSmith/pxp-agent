@@ -12,6 +12,7 @@
 
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
+#include <boost/nowide/fstream.hpp>
 
 #include <algorithm>  // std::find
 
@@ -27,6 +28,8 @@ static const std::string STDOUT { "stdout" };
 static const std::string STDERR { "stderr" };
 static const std::string EXITCODE { "exitcode" };
 static const std::string PID { "pid" };
+static const std::string STREAM { "stream" };
+static const std::string IDX { "idx" };
 
 ResultsStorage::ResultsStorage(const std::string& spool_dir)
         : spool_dir_path_ { spool_dir }
@@ -200,6 +203,45 @@ ActionOutput ResultsStorage::getOutput(const std::string& transaction_id,
     auto output = getOutput_(transaction_id, false);
     output.exitcode = exitcode;
     return output;
+}
+
+void ResultsStorage::updateStreamIndex(const std::string& transaction_id, size_t idx)
+{
+    auto results_path = (spool_dir_path_ / transaction_id / IDX);
+    boost::nowide::ofstream idx_file(results_path.string());
+    idx_file << idx;
+}
+
+void ResultsStorage::clearStreamIndex(const std::string& transaction_id)
+{
+    fs::remove(spool_dir_path_ / transaction_id / IDX);
+}
+
+size_t ResultsStorage::getStreamIndex(const std::string& transaction_id)
+{
+    auto results_path = (spool_dir_path_ / transaction_id / IDX);
+    boost::nowide::ifstream idx_file(results_path.string());
+    size_t idx;
+    idx_file >> idx;
+    return idx;
+}
+
+std::tuple<size_t, std::string> ResultsStorage::readLatest(const std::string& transaction_id, size_t idx)
+{
+    auto results_path = (spool_dir_path_ / transaction_id / STREAM);
+    boost::system::error_code ec;
+    auto sz = fs::file_size(results_path, ec);
+    if (ec || sz <= idx) {
+        // Unable to read the file or no new updates, just return no changes.
+        return std::make_tuple(idx, "");
+    }
+
+    auto to_read = sz - idx;
+    std::string output(to_read, '\0');
+    boost::nowide::ifstream stream_file(results_path.string());
+    stream_file.seekg(idx);
+    stream_file.read(&output[0], to_read);
+    return std::make_tuple(sz, std::move(output));
 }
 
 static void defaultPurgeCallback(const std::string& dir_path)
