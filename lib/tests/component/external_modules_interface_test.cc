@@ -120,19 +120,6 @@ TEST_CASE("Process correctly requests for external modules", "[component]") {
             REQUIRE_NOTHROW(r_p.processRequest(RequestType::Blocking, p_c));
             REQUIRE(c_ptr->sent_blocking_response);
         }
-
-        SECTION("send a PXP error in case of action failure") {
-            data.set<std::string>("transaction_id", "64");
-            data.set<std::string>("module", "failures_test");
-            data.set<std::string>("action", "broken_action");
-            lth_jc::JsonContainer params {};
-            params.set<std::string>("argument", "bikini");
-            data.set<lth_jc::JsonContainer>("params", params);
-            const PCPClient::ParsedChunks p_c { envelope, data, debug, 0 };
-
-            REQUIRE_THROWS_AS(r_p.processRequest(RequestType::Blocking, p_c),
-                              MockConnector::pxpError_msg);
-        }
     }
 
     SECTION("correctly process non-blocking requests") {

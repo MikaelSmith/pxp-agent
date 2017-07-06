@@ -163,18 +163,14 @@ void ExternalModule::processOutputAndUpdateMetadata(ActionResponse& response)
     }
 
     try {
-        // Ensure output format is valid JSON by instantiating
-        // JsonContainer (NB: its ctor does not accept empty strings)
-        lth_jc::JsonContainer results {
-            (response.output.std_out.empty() ? "null" : response.output.std_out) };
-        response.setValidResultsAndEnd(std::move(results));
+        response.setValidResultsAndEnd(response.output.std_out);
     } catch (lth_jc::data_parse_error& e) {
-        LOG_DEBUG("Obtained invalid JSON on stdout for the {1}; (validation "
-                  "error: {2}); stdout:\n{3}",
+        LOG_DEBUG("Obtained data that cannot be represented as a JSON string on stdout for the {1}; "
+                  "(validation error: {2}); stdout:\n{3}",
                   response.prettyRequestLabel(), e.what(), response.output.std_out);
         std::string execution_error {
             lth_loc::format("The task executed for the {1} returned invalid "
-                            "JSON on stdout - stderr:{2}",
+                            "text on stdout - stderr:{2}",
                             response.prettyRequestLabel(),
                             (response.output.std_err.empty()
                                 ? lth_loc::translate(" (empty)")
@@ -266,14 +262,10 @@ void ExternalModule::registerAction(const lth_jc::JsonContainer& action)
         auto input_schema_json = action.get<lth_jc::JsonContainer>("input");
         PCPClient::Schema input_schema { action_name, input_schema_json };
 
-        auto results_schema_json = action.get<lth_jc::JsonContainer>("results");
-        PCPClient::Schema results_schema { action_name, results_schema_json };
-
         // Metadata schemas are valid JSON; store metadata
         LOG_DEBUG("Action '{1} {2}' has been validated", module_name, action_name);
         actions.push_back(action_name);
         input_validator_.registerSchema(input_schema);
-        results_validator_.registerSchema(results_schema);
     } catch (PCPClient::schema_error& e) {
         LOG_ERROR("Failed to parse metadata schemas of action '{1} {2}': {3}",
                   module_name, action_name, e.what());

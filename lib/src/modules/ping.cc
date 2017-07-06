@@ -23,10 +23,8 @@ Ping::Ping() {
     PCPClient::Schema input_schema { PING };
     input_schema.addConstraint("sender_timestamp",
                                PCPClient::TypeConstraint::String);
-    PCPClient::Schema output_schema { PING };
 
     input_validator_.registerSchema(input_schema);
-    results_validator_.registerSchema(output_schema);
 }
 
 lth_jc::JsonContainer Ping::ping(const ActionRequest& request) {

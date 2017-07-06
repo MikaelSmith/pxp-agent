@@ -13,6 +13,7 @@
 #include <leatherman/file_util/file.hpp>
 
 #include <boost/filesystem/operations.hpp>
+#include <boost/algorithm/string/trim.hpp>
 
 #include <catch.hpp>
 
@@ -150,54 +151,6 @@ TEST_CASE("ExternalModule::callAction - blocking", "[modules]") {
             REQUIRE(response.output.std_err.empty());
         }
     }
-
-    SECTION("it should handle module failures") {
-        ExternalModule test_reverse_module { PXP_AGENT_ROOT_PATH
-                                             "/lib/tests/resources/modules/failures_test"
-                                             EXTENSION,
-                                             SPOOL_DIR };
-
-        SECTION("mark the results as invalid if the module returns an invalid result") {
-            std::string failure_txt { (DATA_FORMAT % "\"1234987\""
-                                                   % "\"failures_test\""
-                                                   % "\"get_an_invalid_result\""
-                                                   % "\"maradona\"").str() };
-            PCPClient::ParsedChunks failure_content {
-                    lth_jc::JsonContainer(ENVELOPE_TXT),
-                    lth_jc::JsonContainer(failure_txt),
-                    NO_DEBUG,
-                    0 };
-            ActionRequest request { RequestType::Blocking, failure_content };
-            auto response = test_reverse_module.executeAction(request);
-
-            REQUIRE_FALSE(response.action_metadata.includes("results"));
-            REQUIRE(response.action_metadata.includes("results_are_valid"));
-            REQUIRE_FALSE(response.action_metadata.get<bool>("results_are_valid"));
-        }
-
-        SECTION("it should include error output in response") {
-            std::string failure_txt { (DATA_FORMAT % "\"1234987\""
-                                                   % "\"failures_test\""
-                                                   % "\"broken_action\""
-                                                   % "\"maradona\"").str() };
-            PCPClient::ParsedChunks failure_content {
-                    lth_jc::JsonContainer(ENVELOPE_TXT),
-                    lth_jc::JsonContainer(failure_txt),
-                    NO_DEBUG,
-                    0 };
-            ActionRequest request { RequestType::Blocking, failure_content };
-            auto response = test_reverse_module.executeAction(request);
-
-            REQUIRE(response.action_metadata.includes("results"));
-            REQUIRE(response.action_metadata.get<std::string>("results").empty());
-            REQUIRE(response.action_metadata.includes("results_are_valid"));
-            REQUIRE_FALSE(response.action_metadata.get<bool>("results_are_valid"));
-            REQUIRE(response.action_metadata.includes("execution_error"));
-            REQUIRE(response.action_metadata.get<std::string>("execution_error").find("we failed, sorry ☹") != std::string::npos);
-            REQUIRE(response.output.std_out.empty());
-            REQUIRE(response.output.std_err.find("we failed, sorry ☹") != std::string::npos);
-        }
-    }
 }
 
 TEST_CASE("ExternalModule::callAction - non blocking", "[modules]") {
@@ -327,37 +280,13 @@ TEST_CASE("ExternalModule::executeAction", "[modules][output]") {
         ActionRequest request { RequestType::Blocking, convert_content };
 
         try {
-            REQUIRE(e_m.executeAction(request)
-                        .action_metadata
-                            .get<double>({ "results", "amount" }) == 1098.9);
+            auto result = e_m.executeAction(request);
+            CAPTURE(result.action_metadata.toString());
+            REQUIRE(boost::trim_copy(result.action_metadata.get<std::string>("results"))
+                    == "{\"amount\":1098.9}");
         } catch (...) {
             FAIL("failed to execute the action");
         }
-    }
-
-    SECTION("validates the action output") {
-        ExternalModule e_m {
-            PXP_AGENT_ROOT_PATH
-            "/lib/tests/resources/modules/convert_test"
-            EXTENSION,
-            lth_jc::JsonContainer(
-                "{ \"rate\" : 1.1, \"fee_percent\" : 0.1, \"fee_max\" : 10 }"),
-            SPOOL_DIR };
-        auto convert_txt = (DATA_FORMAT % "\"0633\""
-                                        % "\"convert_test\""
-                                        % "\"convert2\""
-                                        % "{\"amount\" : 10000}").str();
-        PCPClient::ParsedChunks convert_content {
-            lth_jc::JsonContainer(ENVELOPE_TXT),
-            lth_jc::JsonContainer(convert_txt),
-            NO_DEBUG,
-            0 };
-        ActionRequest request { RequestType::Blocking, convert_content };
-
-        auto response = e_m.executeAction(request);
-
-        REQUIRE(response.action_metadata.includes("results_are_valid"));
-        REQUIRE_FALSE(response.action_metadata.get<bool>("results_are_valid"));
     }
 }
 

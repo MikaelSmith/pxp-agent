@@ -13,6 +13,8 @@
 #include <cassert>
 #include <utility>  // std::forward
 
+#include <rapidjson/rapidjson.h>
+
 namespace PXPAgent {
 
 namespace lth_jc   = leatherman::json_container;
@@ -120,13 +122,43 @@ void ActionResponse::setStatus(ActionStatus status)
     action_metadata.set<std::string>(STATUS, ACTION_STATUS_NAMES.at(status));
 }
 
-void ActionResponse::setValidResultsAndEnd(lth_jc::JsonContainer&& results,
+void ActionResponse::setValidResultsAndEnd(lth_jc::JsonContainer results,
                                            const std::string& execution_error)
 {
     action_metadata.set<std::string>(END, lth_util::get_ISO8601_time());
     action_metadata.set<bool>(RESULTS_ARE_VALID, true);
     action_metadata.set<lth_jc::JsonContainer>(RESULTS,
         std::forward<lth_jc::JsonContainer>(results));
+    action_metadata.set<std::string>(STATUS,
+        ACTION_STATUS_NAMES.at(ActionStatus::Success));
+    if (!execution_error.empty())
+        action_metadata.set<std::string>(EXECUTION_ERROR, execution_error);
+}
+
+static bool isValidJson(std::string &s)
+{
+    rapidjson::StringStream source(s.data());
+    rapidjson::InsituStringStream target(&s[0]);
+    target.PutBegin();
+    while (source.Tell() < s.size()) {
+        if (!rapidjson::UTF8<char>::Validate(source, target)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void ActionResponse::setValidResultsAndEnd(std::string results,
+                                           const std::string& execution_error)
+{
+    // Confirm results is valid UTF-8. Throw a data_parse_error if not.
+    if (!isValidJson(results)) {
+        throw lth_jc::data_parse_error { _("invalid json string") };
+    }
+
+    action_metadata.set<std::string>(END, lth_util::get_ISO8601_time());
+    action_metadata.set<bool>(RESULTS_ARE_VALID, true);
+    action_metadata.set<std::string>(RESULTS, results);
     action_metadata.set<std::string>(STATUS,
         ACTION_STATUS_NAMES.at(ActionStatus::Success));
     if (!execution_error.empty())

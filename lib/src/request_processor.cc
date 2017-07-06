@@ -723,10 +723,6 @@ void RequestProcessor::processStatusRequest(const ActionRequest& request)
 
     ExternalModule::processOutputAndUpdateMetadata(a_r);
 
-    if (a_r.action_metadata.get<bool>("results_are_valid"))
-        // Validate by using the action's output JSON schema
-        mod_ptr->validateOutputAndUpdateMetadata(a_r);
-
     // Update metadata file while holding the lock (if cached)
     LOG_INFO("Setting the status of the transaction {1} to '{2}' on its "
              "metadata file",

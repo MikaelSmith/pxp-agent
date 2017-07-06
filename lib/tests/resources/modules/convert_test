@@ -95,8 +95,7 @@ def action_convert
 end
 
 def action_convert2
-  results = { :amount2 => do_convert } # intentionally doesn't match schema
-  puts results.to_json
+  puts "\udfff"
 end
 
 action = ARGV.shift || 'metadata'

@@ -118,6 +118,10 @@ msgstr ""
 msgid "invalid action metadata"
 msgstr ""
 
+#: lib/src/action_response.cc
+msgid "invalid json string"
+msgstr ""
+
 #. info
 #: lib/src/agent.cc
 msgid "Connecting using PCP v1"
@@ -456,14 +460,14 @@ msgstr ""
 #. debug
 #: lib/src/external_module.cc
 msgid ""
-"Obtained invalid JSON on stdout for the {1}; (validation error: {2}); "
-"stdout:\n"
+"Obtained data that cannot be represented as a JSON string on stdout for the "
+"{1}; (validation error: {2}); stdout:\n"
 "{3}"
 msgstr ""
 
 #: lib/src/external_module.cc
 msgid ""
-"The task executed for the {1} returned invalid JSON on stdout - stderr:{2}"
+"The task executed for the {1} returned invalid text on stdout - stderr:{2}"
 msgstr ""
 
 #: lib/src/external_module.cc
@@ -555,7 +559,6 @@ msgid "The task for the {1} has completed"
 msgstr ""
 
 #: lib/src/external_module.cc
-#: lib/src/module.cc
 msgid "(empty)"
 msgstr ""
 
@@ -568,22 +571,6 @@ msgstr ""
 
 #: lib/src/external_module.cc
 msgid "failed to write output on file"
-msgstr ""
-
-#: lib/src/module.cc
-msgid "The task executed for the {1} returned invalid results."
-msgstr ""
-
-#: lib/src/module.cc
-msgid "The task executed for the {1} returned "
-msgstr ""
-
-#: lib/src/module.cc
-msgid "no results on stdout - stderr: "
-msgstr ""
-
-#: lib/src/module.cc
-msgid "invalid results on stdout: {1} - stderr: "
 msgstr ""
 
 #: lib/src/module.cc

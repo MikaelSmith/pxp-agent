@@ -32,7 +32,6 @@ class Module {
     std::vector<std::string> actions;
     PCPClient::Validator config_validator_;
     PCPClient::Validator input_validator_;
-    PCPClient::Validator results_validator_;
 
     Module();
 
@@ -41,14 +40,6 @@ class Module {
 
     /// The type of the module.
     virtual ModuleType type() { return ModuleType::Internal; }
-
-    /// Validate the output contained in the ActionResponse instance,
-    /// by using the module's 'output' JSON schema. In case of errors,
-    /// the response's metadata will be updated ('results_are_valid'
-    /// will be set to false, 'execution_error' will be populated, and
-    /// 'status' to Failure, but 'end' will not be updated).
-    /// This member function does not throw validation errors.
-    void validateOutputAndUpdateMetadata(ActionResponse& response);
 
     /// Call the specified action and validate its results.
     /// Return an ActionResponse instance containing the action

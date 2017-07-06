@@ -45,7 +45,9 @@ class ActionResponse {
 
     // Set results_are_valid to true in the action metadata and update
     // the specified entries.
-    void setValidResultsAndEnd(leatherman::json_container::JsonContainer&& results,
+    void setValidResultsAndEnd(leatherman::json_container::JsonContainer results,
+                               const std::string& execution_error = "");
+    void setValidResultsAndEnd(std::string results,
                                const std::string& execution_error = "");
 
     // Set results_are_valid to false in the action metadata and
