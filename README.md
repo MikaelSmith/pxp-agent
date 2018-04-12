@@ -19,8 +19,9 @@ Dependencies
  - Boost
  - OpenSSL
  - ruby (2.0 and newer)
- - [leatherman][leatherman] (0.5.1 or newer)
- - [cpp-pcp-client][cpp-pcp-client] (master)
+ - [leatherman][leatherman] (1.4.0 or newer)
+ - [cpp-pcp-client][cpp-pcp-client] (1.5.5 or newer)
+ - [cpp-hocon][cpp-hocon] (0.1.6 or newer)
 
 Initial Setup
 -------------
@@ -439,6 +440,7 @@ The path of the PID file; the default is */var/run/puppetlabs/pxp-agent.pid*
 
 Please refer to [this][contributing] document.
 
+[cpp-hocon]: https://github.com/puppetlabs/cpp-hocon
 [cpp-pcp-client]: https://github.com/puppetlabs/cpp-pcp-client
 [leatherman]: https://github.com/puppetlabs/leatherman
 [nssm]: https://nssm.cc
