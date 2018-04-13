@@ -79,7 +79,7 @@ void nonBlockingActionTask(std::shared_ptr<Module> module_ptr,
                            ActionRequest request,
                            std::shared_ptr<PXPConnector> connector_ptr,
                            std::shared_ptr<ResultsStorage> storage_ptr,
-                           std::shared_ptr<std::atomic<bool>> done)
+                           std::shared_ptr<std::atomic<bool>> &done)
 {
     ResultsMutex::Mutex_Ptr mtx_ptr;
     std::unique_ptr<ResultsMutex::Lock> lck_ptr;

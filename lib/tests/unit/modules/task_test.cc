@@ -29,7 +29,7 @@
 #define EXTENSION ""
 #endif
 
-namespace PXPAgent {
+using namespace PXPAgent;
 
 namespace fs = boost::filesystem;
 namespace pt = boost::posix_time;
@@ -477,5 +477,3 @@ TEST_CASE("purge old tasks", "[modules]") {
         REQUIRE(num_purged_results == 1);
     }
 }
-
-}  // namespace PXPAgent

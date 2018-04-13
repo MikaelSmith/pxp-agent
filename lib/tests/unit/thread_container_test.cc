@@ -11,7 +11,7 @@
 #include <string>
 #include <set>
 
-namespace PXPAgent {
+using namespace PXPAgent;
 
 namespace pcp_util = PCPClient::Util;
 
@@ -21,7 +21,7 @@ TEST_CASE("ThreadContainer::ThreadContainer", "[utils]") {
     }
 }
 
-void testTask(std::shared_ptr<std::atomic<bool>> a,
+void testTask(std::shared_ptr<std::atomic<bool>> &a,
               const uint32_t task_duration_us) {
     pcp_util::this_thread::sleep_for(
         pcp_util::chrono::microseconds(task_duration_us));
@@ -32,7 +32,7 @@ void addTasksTo(ThreadContainer& container,
                 const uint32_t num_tasks,
                 const uint32_t caller_duration_us,
                 const uint32_t task_duration_us,
-                std::string prefix = "") {
+                std::string const& prefix = "") {
     uint32_t idx;
     for (idx = 0; idx < num_tasks; idx++) {
         auto task_name = prefix + std::to_string(idx);
@@ -194,5 +194,3 @@ TEST_CASE("ThreadContainer::getThreadNames", "[async]") {
             REQUIRE(expected_names.find(name) != expected_names.end());
     }
 }
-
-}  // namespace PXPAgent
