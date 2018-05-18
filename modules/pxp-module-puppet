@@ -173,15 +173,14 @@ module Pxp
       end
     end
 
-    def get_result_from_report(last_run_report, exitcode, start_time)
+    def get_result_from_report(last_run_report, result, start_time)
+      exitcode = result.exitstatus
       if !File.exist?(last_run_report)
-        return make_error_result(exitcode, Errors::NoLastRunReport,
-                                 "#{last_run_report} doesn't exist")
+        return make_error_result(exitcode, Errors::NoLastRunReport, result.to_s)
       end
 
       if start_time && File.mtime(last_run_report) == start_time
-        return make_error_result(exitcode, Errors::NoLastRunReport,
-                                 "#{last_run_report} was not written")
+        return make_error_result(exitcode, Errors::NoLastRunReport, result.to_s)
       end
 
       last_run_report_yaml = {}
@@ -233,8 +232,9 @@ module Pxp
       start_time = get_start_time(last_run_report)
       run_result = Puppet::Util::Execution.execute(puppet_agent_command, {:failonfail => false,
                                                                           :custom_environment => make_environment_hash(),
+                                                                          :combine => true,
                                                                           :override_locale => false})
-      return start_time, (run_result ? run_result.exitstatus : nil)
+      return start_time, run_result
     end
 
     def run
@@ -253,16 +253,16 @@ module Pxp
 
       # Initially ignore the lockfile. It might be out-dated, so we give Puppet a chance
       # to clean it up and run.
-      start_time, exitcode = try_run(last_run_report)
-      if exitcode.nil?
+      start_time, result = try_run(last_run_report)
+      if result.nil?
         return make_error_result(DEFAULT_EXITCODE, Errors::FailedToStart,
                                  "Failed to start Puppet agent")
       end
 
       # If the run was successful, don't check for failure modes.
-      if exitcode != 0
+      if result.exitstatus != 0
         if disabled?(puppet_config['agent_disabled_lockfile'] || '')
-          return make_error_result(exitcode, Errors::Disabled,
+          return make_error_result(result.exitstatus, Errors::Disabled,
                                    "Puppet agent is disabled")
         end
 
@@ -276,16 +276,16 @@ module Pxp
         if running?(lockfile)
           wait_for_lockfile(lockfile)
 
-          start_time, exitcode = try_run(last_run_report)
+          start_time, result = try_run(last_run_report)
 
-          if exitcode.nil?
+          if result.nil?
             return make_error_result(DEFAULT_EXITCODE, Errors::FailedToStart,
                                      "Failed to start Puppet agent")
           end
         end
       end
 
-      return get_result_from_report(last_run_report, exitcode, start_time)
+      return get_result_from_report(last_run_report, result, start_time)
     end
 
     # TODO(ale): remove `env` from input before bumping to the next version
